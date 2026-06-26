@@ -47,12 +47,24 @@ print ('Order 0 diffractive efficency:', Order0)
 print ('Order -1 diffraction efficency:', OrderNegative1)
 print ('Order 1 diffraction efficency:', Order1)
 
-#DISPLAY GRAPHIC
-fig, ax = plt.subplots(figsize=(7, 4))
-val = abs(field_cell[:, 0, :, 0])**2
+from matplotlib.patches import Rectangle #ISOLATE AND OUTLINE PILLAR FOR VISUALIZATION
+val = np.abs(field_cell[:, 0, :, 0])**2
+pixels_per_column = val.shape[1] // 10
+pillar = 1
+start = pillar * pixels_per_column
+end = (pillar + 1) * pixels_per_column
+fig, ax = plt.subplots(figsize=(7,4))
 im = ax.imshow(val, cmap='jet', aspect='auto')
-fig.colorbar(im, ax=ax)
-ax.set_title('1D E-field Y')
-
+rect = Rectangle(
+    (start, 0),                      
+    end - start,                     
+    val.shape[0],                   
+    edgecolor='blue',
+    facecolor='none',
+    linewidth=2
+)
+ax.add_patch(rect)
+plt.colorbar(im)
+plt.title('1D E-field Y')
 plt.show()
 
