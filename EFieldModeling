@@ -1,0 +1,85 @@
+
+#IMPORTS
+import numpy as np
+import meent
+import matplotlib.pyplot as plt
+
+#SET PARAMETERS
+n_top = 1.0 #refractive index of top (silica)
+n_bot = 1.45 #refractive index of bottom (hafnia)
+theta = 30 * np.pi / 180 #angle of incidence
+thickness = [500] 
+period = [500]
+wavelength = 600
+pol =0
+fto = 30 #modeling with sin/cos curves
+duty_cycle = .4
+type_complex = np.complex128
+
+#duty cycle = width/period
+#next plan: create function with for-loop in which duty cycle can be adjusted
+def main_script(): 
+#UCELL INTIALIZATION
+    ucell_1d_m = np.ones((1,1,1000)) 
+    for i in range(ucell_1d_m.shape[2]):
+        if i<ucell_1d_m.shape[2]*duty_cycle:
+            ucell_1d_m[0,0,i] = 1.8981
+    ucell_1d_m = np.array([
+        [
+            [0, 1, 0, 1, 1, 0, 1, 0, 1, 1, ],
+        ]
+    ])*(1.8981-1.45)+1.45 #want to produce silica/hafnia refractive indexes
+
+    mee = meent.call_mee(backend=0, n_top=n_top, n_bot=n_bot, theta=theta, fto=fto, pol = 0,
+                    wavelength=wavelength, period=period, ucell=ucell_1d_m, thickness=thickness,
+                    type_complex=type_complex) #call backend
+    
+#CALCULATE/DISPLAY DIFFRACTION EFFICENCIES
+    result = mee.conv_solve()
+    res = result.res
+    de_ri = res.de_ri_s #diffraction efficency of total reflection from TE component
+    de_ti = res.de_ti_s #diffraction efficency of transmission from TE in total
+    print("total TE reflection diffraction efficency:", de_ri.sum())
+    print("total TE transmission diffraction efficency:", de_ti.sum())
+    result, field_cell = mee.conv_solve_field(res_z=100, res_y=1, res_x=100)
+    print ('Order 0 diffractive efficency:', de_ri[0,fto])
+    print ('Order -1 diffraction efficency:', de_ri[0,fto-1])
+    print ('Order 1 diffraction efficency:', de_ri[0,fto+1]) 
+
+#CALCULATE/DISPLAY ABSORPTION
+    print("absorption:", (1-(de_ti.sum()))-(de_ri.sum()))
+
+#CALCULATE/DISPALY EFIS
+    OverallMaxEFI = np.abs(field_cell[:,0,:,0])**2
+    print("EFI Max:", np.max(OverallMaxEFI)) #find max overall EFI
+    val = np.abs(field_cell[:, 0, :, 0])**2
+    #PillarMaxEFI = np.abs(val[:, 0, :, 0])**2
+    #print("Max pillar EFI:", np.max(PillarMaxEFI)) #find max pillar EFI
+    #TrenchMaxEFI = np.abs()
+    #print("Max trench EFI:"np.max((TrenchMaxEFI)) #find max trench EFI
+
+#DISPLAY EFI DATA VISUALLY
+    from matplotlib.patches import Rectangle #ISOLATE AND OUTLINE PILLAR 
+    #pixels_per_column = val.shape[1]
+    pillar = .2
+    start = 0
+    end = (pillar) * val.shape[1]
+    fig, ax = plt.subplots(figsize=(7,4))
+    im = ax.imshow(val, cmap='jet', aspect='auto')
+    rect = Rectangle( #is this actually identifying and outlining a pillar or just drawing a rectangle?
+        (start, 0),                      
+        end - start,                     
+        val.shape[0],                   
+        edgecolor='blue',
+        facecolor='none',
+        linewidth=2
+    )
+    ax.add_patch(rect)
+    plt.colorbar(im)
+    plt.title('1D E-field Y')
+    plt.show()
+main_script ()
+
+
+'''def function(duty_cycle,height):
+    return(DE,PillarMaxEFI)'''
