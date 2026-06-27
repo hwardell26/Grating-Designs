@@ -1,3 +1,4 @@
+
 #IMPORTS
 import numpy as np
 import meent
@@ -12,65 +13,37 @@ period = [500]
 wavelength = 600
 pol =0
 fto = 30 
-height = int(input("height"))
-duty_cycle = float(input("Duty cycle (%): ")) / 100
 type_complex = np.complex128
-rlist = ["total TE reflection diffraction efficency:", "total TE transmission diffraction efficency:", 'Order 0 diffractive efficency:',
-'Order -1 diffraction efficency:', 'Order 1 diffraction efficency:', "absorption:", "EFI Max:","Max pillar EFI:", "Max trench EFI:"] #results
+rlist = ["total TE reflection diffraction efficency:", "total TE transmission diffraction efficency:", 'Order 0 diffractive efficency:','Order -1 diffraction efficency:', 'Order 1 diffraction efficency:', "absorption:", "EFI Max:","Max pillar EFI:", "Max trench EFI:"] #results
 
-#MAIN SCRIPT
-def main_script(): 
-    ucell_1d_m = np.ones((1,1,1000)) #ucell initialization
+#Calcuate DEs/absorption/EFIs
+def calculation_function(duty_cycle, height):
+    ucell_1d_m = np.ones((1,1,1000)) # ucell initialization
     for i in range(ucell_1d_m.shape[2]):
-        if i<ucell_1d_m.shape[2]*duty_cycle:
+        if i < ucell_1d_m.shape[2] * duty_cycle:
             ucell_1d_m[0,0,i] = 1.8981 #refractive index hafnia
-    ucell_1d_m = np.array([
-        [
-            [0, 1, 0, 1, 1, 0, 1, 0, 1, 1, ],
-        ]
-    ])*(1.8981-1.45)+1.45 #refractive indexes hafnia/silica
-
-    mee = meent.call_mee(backend=0, n_top=n_top, n_bot=n_bot, theta=theta, fto=fto, pol = 0,
-                    wavelength=wavelength, period=period, ucell=ucell_1d_m, thickness=thickness,
-                    type_complex=type_complex) #call backend
-    
-#CALCULATE/DISPLAY DIF EFFICENCIES/ABSORPTION/EFIS
+    mee = meent.call_mee( backend=0,  n_top=n_top, n_bot=n_bot, theta=theta, fto=fto, pol=pol, wavelength=wavelength, period=period, ucell=ucell_1d_m, thickness=[height],  type_complex=type_complex)
     result = mee.conv_solve()
     res = result.res
-    de_ri = res.de_ri_s #DE of total reflection
-    de_ti = res.de_ti_s #DE of total transmission
-    print(rlist[0], de_ri.sum())
-    print(rlist[1], de_ti.sum())
+    de_ri = res.de_ri_s
+    de_ti = res.de_ti_s
     result, field_cell = mee.conv_solve_field(res_z=100, res_y=1, res_x=100)
-    print (rlist[2], de_ri[0,fto])
-    print (rlist[3], de_ri[0,fto-1])
-    print (rlist[4], de_ri[0,fto+1]) 
-    print(rlist[5], (1-(de_ti.sum()))-(de_ri.sum()))
-    OverallMaxEFI = np.abs(field_cell[:,0,:,0])**2
-    print(rlist[6], np.max(OverallMaxEFI)) #find max overall EFI
-    val = np.abs(field_cell[:, 0, :, 0])**2
+    val = np.abs(field_cell[:,0,:,0])**2
     pillar_end = int(val.shape[1] * duty_cycle)
-    pillar_region = val[:, :pillar_end]  # Slice pillar and trench regions
+    pillar_region = val[:, :pillar_end]
     trench_region = val[:, pillar_end:]
     PillarMaxEFI = np.max(pillar_region)
-    print(rlist[7], PillarMaxEFI)
     TrenchMaxEFI = np.max(trench_region)
-    print(rlist[8], TrenchMaxEFI)
-    '''
-    pillar_array = np.repeat(ucell_1d_m, val.shape[1] // len(ucell_1d_m))
-    trench_array = ~pillar_array 
-    PillarMaxEFI = np.max(val[:, pillar_array])
+    print(rlist[0], de_ri.sum())
+    print(rlist[1], de_ti.sum())
+    print(rlist[2], de_ri[0, fto])
+    print(rlist[3], de_ri[0, fto-1])
+    print(rlist[4], de_ri[0, fto+1])
+    print(rlist[5], (1 - de_ti.sum()) - de_ri.sum())#absorption
+    print(rlist[6], np.max(val))
     print(rlist[7], PillarMaxEFI)
-    TrenchMaxEFI = np.max(val[:, trench_array])
     print(rlist[8], TrenchMaxEFI)
-    '''
-    #PillarMaxEFI = np.abs(val[:, 0, :, 0])**2
-    #print(rlist[7], np.max(PillarMaxEFI)) #find max pillar EFI
-    #TrenchMaxEFI = np.abs() #the opposite of PillarMaxEFI
-    #print(rlist[8], np.max((TrenchMaxEFI)) #find max trench EFI
-
-#DISPLAY EFI DATA
-    from matplotlib.patches import Rectangle #isolate/outline pillar
+    from matplotlib.patches import Rectangle #isolate pillar
     pillar = .2 
     start = 0
     end = (pillar) * val.shape[1]
@@ -88,11 +61,16 @@ def main_script():
     plt.colorbar(im)
     plt.title('1D E-field Y')
     plt.show()
-main_script ()
+    plt.imshow(val, cmap="jet", aspect="auto")
+    plt.colorbar()
+    plt.show()
+    return de_ri, PillarMaxEFI, TrenchMaxEFI
 
 
-'''def function(duty_cycle,height):
-    duty_cycle = int(input("duty cycle:" ))
-    height = int(input("height"))
-    duty_cycle = input(duty cycle: )
-    return(DE,PillarMaxEFI)'''
+def main():
+    duty_cycle = float(input("Duty cycle (%): ")) / 100
+    height = float(input("Height (nm): "))
+    de_ri, pillar_max, trench_max = calculation_function(duty_cycle, height)
+
+main()
+calculation_function()
