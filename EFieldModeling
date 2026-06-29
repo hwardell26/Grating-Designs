@@ -70,8 +70,7 @@ def minimization_function(x):
     mee = meent.call_mee(backend=0, n_top=n_top, n_bot=n_bot, theta=theta,fto=fto, pol=pol, wavelength=wavelength, period=period, ucell=ucell_1d_m, thickness=[height], type_complex=type_complex)
     res = mee.conv_solve().res
     de_ri = res.de_ri_s
-    de_ti = res.de_ti_s
-    return -de_ri[0, fto+1] / de_ti.sum()
+    return -de_ri[0, fto-1] 
 
 def main():
     duty_cycle = float(input("Duty cycle (%): ")) / 100
