@@ -4,32 +4,46 @@ import meent
 import matplotlib.pyplot as plt
 import scipy
 from scipy.optimize import minimize
+from contextlib import contextmanager
+from scipy.optimize import differential_evolution
 
 #SET PARAMETERS
-n_top = 1.0 #refractive index of top (air)
-n_bot = 1.45 #refractive index of bottom (silica)
-theta = 30 * np.pi / 180 #angle of incidence
+n_top = 1.0
+n_bot = 1.45
+theta = 61 * np.pi / 180
 period = [500]
-wavelength = 600
-pol =0
-fto = 30 
+wavelength = 1053
+pol = 0
+fto = 10
 type_complex = np.complex128
-rlist = ["total diffraction efficency of reflection:", "total diffraction efficency of transmission:", 'Order 0 diffractive efficency:','Order -1 diffraction efficency:', 'Order 1 diffraction efficency:', "absorption:", "EFI Max:","Max pillar EFI:", "Max trench EFI:", "minimization result"] #results
+rlist = ["total diffraction efficency of reflection:","total diffraction efficency of transmission:","Order 0 diffractive efficency:","Order -1 diffraction efficency:",
+"Order 1 diffraction efficency:", "absorption:","EFI Max:","Max pillar EFI:","Max trench EFI:","minimization result","optimized DEs:"]
+names = ["HfO2 Layer 1","SiO2 Layer 1","HfO2 Layer 2","SiO2 Layer 2"]
 
 
 #Calcuate and display DEs/absorption/EFIs
-def calculation_function(duty_cycle, height):
-    ucell_1d_m = np.ones((1,1,1000)) # ucell initialization
-    for i in range(ucell_1d_m.shape[2]):
-        if i < ucell_1d_m.shape[2] * duty_cycle:
-            ucell_1d_m[0,0,i] = 1.8981 #refractive index hafnia
-    mee = meent.call_mee( backend=0,  n_top=n_top, n_bot=n_bot, theta=theta, fto=fto, pol=pol, wavelength=wavelength, period=period, ucell=ucell_1d_m, thickness=[height],  type_complex=type_complex)
-    result = mee.conv_solve() #begin solving
-    res = result.res
+def calculation_function(duty_cycle, height, layers=None):
+    if layers == None:
+        layers = [100,100,100,100]
+    #inialize base grating
+    ucell_1d_m = np.ones((5,1,1000))
+    cutoff = int(ucell_1d_m.shape[2] * duty_cycle)
+    ucell_1d_m[0,0,:cutoff] = 1.8981 
+    #intialize top layers
+    ucell_1d_m[1,0,:] = 1.8981
+    ucell_1d_m[2,0,:] = 1.45
+    ucell_1d_m[3,0,:] = 1.8981
+    ucell_1d_m[4,0,:] = 1.45
+    thickness = [height, layers[0], layers[1], layers[2], layers[3]]
+    mee = meent.call_mee(backend=0,n_top=n_top,n_bot=n_bot,theta=theta,fto=fto,pol=pol,
+    wavelength=wavelength,period=period,ucell=ucell_1d_m,thickness=thickness,type_complex=type_complex)
+    #begin solving for DEs/absorption/EFIs
+    result1 = mee.conv_solve()
+    res = result1.res
     de_ri = res.de_ri_s
     de_ti = res.de_ti_s
-    result, field_cell = mee.conv_solve_field(res_z=100, res_y=1, res_x=100)
-    val = np.abs(field_cell[:,0,:,0])**2
+    result1, field_cell = mee.conv_solve_field(res_z=100,res_y=1,res_x=100)
+    val = np.sum(np.abs(field_cell[:,0,:,:])**2, axis=-1)
     pillar_end = int(val.shape[1] * duty_cycle)
     pillar_region = val[:, :pillar_end]
     trench_region = val[:, pillar_end:]
@@ -37,47 +51,72 @@ def calculation_function(duty_cycle, height):
     TrenchMaxEFI = np.max(trench_region)
     print(rlist[0], de_ri.sum())
     print(rlist[1], de_ti.sum())
-    print(rlist[2], de_ri[0, fto]) 
+    print(rlist[2], de_ri[0, fto])
     print(rlist[3], de_ri[0, fto-1])
     print(rlist[4], de_ri[0, fto+1])
-    print(rlist[5], (1 - de_ti.sum()) - de_ri.sum())#absorption
+    print(rlist[5], (1-de_ti.sum())-de_ri.sum())
     print(rlist[6], np.max(val))
     print(rlist[7], PillarMaxEFI)
     print(rlist[8], TrenchMaxEFI)
-    from matplotlib.patches import Rectangle #isolate pillar/display
-    pillar = duty_cycle
-    start = 0
-    end = (pillar) * val.shape[1]
+    #display EFI graph
+    from matplotlib.patches import Rectangle
     fig, ax = plt.subplots(figsize=(7,4))
     im = ax.imshow(val, cmap='jet', aspect='auto')
-    rect = Rectangle((start, 0), end - start, val.shape[0], edgecolor='blue', facecolor='none', linewidth=2)
+    rect = Rectangle((0,0),pillar_end,val.shape[0],edgecolor='blue',facecolor='none',linewidth=2)
     ax.add_patch(rect)
     ax.set_xlabel("X-Axis")
     ax.set_ylabel("Z-Axis")
-    plt.title('1D E-field Y')
+    plt.title("1D E-field Y")
     plt.imshow(val, cmap="jet", aspect="auto")
     plt.colorbar()
     plt.show()
     return de_ri, de_ti, PillarMaxEFI, TrenchMaxEFI
 
-#this actually takes a good minute to execute
+
+#Jointly optimize grating/coating layers for duty cycle and height
 def minimization_function(x):
+    #optimize base grating
     print("Evaluating:", x)
-    duty_cycle, height = x
-    ucell_1d_m = np.ones((1,1,1000))
+    duty_cycle, height, hfo2_1, sio2_1, hfo2_2, sio2_2 = x
+    ucell_1d_m = np.ones((5,1,1000))
     cutoff = int(ucell_1d_m.shape[2] * duty_cycle)
-    ucell_1d_m[0,0,:cutoff] = 1.8981
-    mee = meent.call_mee(backend=0, n_top=n_top, n_bot=n_bot, theta=theta,fto=fto, pol=pol, wavelength=wavelength, period=period, ucell=ucell_1d_m, thickness=[height], type_complex=type_complex)
+    ucell_1d_m[0,0,:cutoff] = 1.8981 #grating
+
+    #optimize top layers/film stack
+    ucell_1d_m[1,0,:] = 1.8981
+    ucell_1d_m[2,0,:] = 1.45
+    ucell_1d_m[3,0,:] = 1.8981
+    ucell_1d_m[4,0,:] = 1.45
+    thickness = [height, hfo2_1, sio2_1, hfo2_2, sio2_2]
+
+    #call backend/calculate
+    mee = meent.call_mee(backend=0,n_top=n_top,n_bot=n_bot,theta=theta,fto=fto,pol=pol,wavelength=wavelength,
+    period=period,ucell=ucell_1d_m,thickness=thickness,type_complex=type_complex)
     res = mee.conv_solve().res
     de_ri = res.de_ri_s
-    return -de_ri[0, fto-1] 
+    return -de_ri[0, fto-1]
 
 def main():
     duty_cycle = float(input("Duty cycle (%): ")) / 100
     height = float(input("Height (nm): "))
+
+    #optimize for grating duty cycle and height
     calculation_function(duty_cycle, height)
-    x0 = [duty_cycle, height]
-    result = minimize(minimization_function,x0,method="Powell",bounds=[(0.05, 0.95), (100, 1000)])
-    print(rlist[9], result)
-    
+    x0 = [duty_cycle, height, 100, 100, 100, 100]
+    bounds = [(0.05,0.95),(100,1000),(10,500),(10,500),(10,500),(10,500)]
+    result1 = differential_evolution(minimization_function,bounds=bounds,x0=x0,strategy="best1bin",
+    maxiter=200, polish=True) #maxiter=maximum iterations
+    print(rlist[9], result1)
+    duty_cycle = result1.x[0]
+    height = result1.x[1]
+    layers = list(result1.x[2:])
+    print("Final optimized coating")
+    print("Duty cycle =", duty_cycle)
+    print("Height =", height)
+    print("HfO2 Layer 1 =", layers[0])
+    print("SiO2 Layer 1 =", layers[1])
+    print("HfO2 Layer 2 =", layers[2])
+    print("SiO2 Layer 2 =", layers[3])
+    calculation_function(duty_cycle, height, layers)
+
 main()
