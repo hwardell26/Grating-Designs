@@ -17,8 +17,10 @@ pol = 0
 fto = 12
 type_complex = np.complex128
 rlist = ["total diffraction efficency of reflection:","total diffraction efficency of transmission:","Order 0 diffractive efficency:","Order -F1 diffraction efficency:",
-"Order 1 diffraction efficency:", "absorption:","EFI Max:","Max pillar EFI:","Max trench EFI:","minimization result","optimized DEs:"]
+"Order 1 diffraction efficency:", "absorption:","EFI Max:","Max pillar EFI:","Max trench EFI:","minimization result","optimized DEs:", "Final optimized coating",
+"Duty cycle =", "Height =", "HfO2 Layer 1 =", "SiO2 Layer 1 =", "HfO2 Layer 2 =", "SiO2 Layer 2 =", "Optimization parameter result:"]
 names = ["HfO2 Layer 1","SiO2 Layer 1","HfO2 Layer 2","SiO2 Layer 2"]
+AL = ["Z-Axis", "X-Axis", "1D E-field Y", "Refractive Index Map (n)", "Damage Factor LIDT/EFI"]
 
 
 #Calcuate and display DEs/absorption/EFIs
@@ -68,72 +70,44 @@ def calculation_function(duty_cycle, height, layers=None):
     total_t = sum(thickness)
     z_pixels = [max(1, round(res_z * t / total_t)) for t in thickness]
     z_pixels[0] += res_z - sum(z_pixels)  
-    layer_n = [
-        np.full(res_x, 1.45), # SiO2 layer 1
+    layer_n = [np.full(res_x, 1.45), # SiO2 layer 1
         np.full(res_x, 1.8981),  # HfO2 layer 1
-        np.full(res_x, 1.45),    
-        np.full(res_x, 1.8981), 
-        np.array([1.8981 if i < int(res_x * duty_cycle) else 1.45 for i in range(res_x)]),  # grating   
-    ]
+        np.full(res_x, 1.45), np.full(res_x, 1.8981), np.array([1.8981 if i < int(res_x * duty_cycle) else 1.45 for i in range(res_x)])]
     n_map = np.zeros((res_z, res_x))
     z = 0
     for nz, n_row in zip(z_pixels, layer_n):
         n_map[z:z+nz, :] = n_row
         z += nz
 
-    #calculate damage factor map 
-    # minimum(Lidt_m/EFI)=LIDT of total apparatus at peak EFI and proportional to : 12*n^-3* Ey^-1
+    #minimum(Lidt_m/EFI)=LIDT of total apparatus at peak EFI and proportional to : 12*n^-3* Ey^-1
     de_minus1 = de_ri[0, fto-1]
     damage_factor = 12/(val*n_map**3)
-    #optimization parameter(LIDT map): DE/damage factor ; proportional to amount energy reaching target
-    #maximum of this parameter is the location (and value) of max energy reaching target
+    #optimization parameter(LIDT map): DE/damage factor ; proportional to amount energy reaching target. maximum of this parameter is the location (and value) of max energy reaching target
     optimization_param = de_minus1/damage_factor
     print("LIDT Metric:", np.min(damage_factor))
     print("Optimization parameter:", np.max(optimization_param))
-    print("Location of max (z, x):", np.unravel_index(np.argmax(optimization_param), optimization_param.shape)) #unravel convert array to coords
-    '''
-    MaxOptParam = differential_evolution(optimization_param, bounds=bounds, popsize=60, workers=-1,
-    maxiter=1000, polish = True, updating="deferred") #maxiter=maximum iterations
-    #next step:
-        #maximize optimization parameter
-        #do (-1)(optimization parameter) as output of differental evolution because it minimizes the function
-    '''
-    #display EFI/n/LIDT maps
+    print("Location of max (z, x):", np.unravel_index(np.argmax(optimization_param), optimization_param.shape)) #unravel convert array to coords 
+  
+    # Display EFI / ref index / LIDT maps
     from matplotlib.patches import Rectangle
+    plot_data = [val, n_map, damage_factor]
+    plot_cmaps = ['jet', 'gray', 'hot']
     fig, axes = plt.subplots(1, 3, figsize=(21,4))
-    ax = axes[0]
-    im1= axes[0].imshow(val, cmap='jet', aspect='auto')
-    rect = Rectangle((0,0),pillar_end,val.shape[0],edgecolor='blue',facecolor='none',linewidth=2)
-    ax.add_patch(rect)
-    ax.set_xlabel("X-Axis")
-    ax.set_ylabel("Z-Axis")
-    ax.set_title("1D E-field Y")
-    plt.colorbar(im1, ax=axes[0])
-    ax = axes[1]
-    im2 = ax.imshow(n_map, cmap='gray', aspect='auto')
-    rect = Rectangle((0,0),pillar_end,res_z,edgecolor='blue',facecolor='none',linewidth=2)
-    ax.add_patch(rect)
-    ax.set_xlabel("X-Axis")
-    ax.set_ylabel("Z-Axis")
-    ax.set_title("Refractive Index Map (n)")
-    plt.colorbar(im2, ax=ax)
-    ax = axes[2]
-    im3 = ax.imshow(damage_factor, cmap='hot', aspect='auto')
-    rect = Rectangle((0,0),pillar_end,res_z,edgecolor='blue',facecolor='none',linewidth=2)
-    ax.add_patch(rect)
-    ax.set_xlabel("X-Axis")
-    ax.set_ylabel("Z-Axis")
-    ax.set_title("Damage Factor LIDT/EFI")
-    plt.colorbar(im3, ax=ax)
+    for i, ax in enumerate(axes):
+        im = ax.imshow(plot_data[i], cmap=plot_cmaps[i], aspect='auto')
+        rect = Rectangle((0, 0), pillar_end, plot_data[i].shape[0], edgecolor='blue', facecolor='none', linewidth=2)
+        ax.add_patch(rect)
+        ax.set_xlabel(AL[1])
+        ax.set_ylabel(AL[0])
+        ax.set_title(AL[i + 2])   # AL[2], AL[3], AL[4]
+        plt.colorbar(im, ax=ax)
     plt.tight_layout()
     plt.show()
-
-    return de_ri, de_ti, PillarMaxEFI, TrenchMaxEFI
+    return -np.max(optimization_param), de_ri, de_ti, PillarMaxEFI, TrenchMaxEFI  #return negative for minimization
 
 #Jointly optimize grating/coating layers for duty cycle and height
 def minimization_function(x):
     #optimize base grating
-    #print("Evaluating:", x)
     duty_cycle, height, hfo2_1, sio2_1, hfo2_2, sio2_2 = x
     ucell_1d_m = np.ones((5,1,1000))*1.45
     cutoff = int(ucell_1d_m.shape[2] * duty_cycle)
@@ -141,9 +115,7 @@ def minimization_function(x):
 
     #optimize top layers/film stack
     ucell_1d_m[3,0,:] = np.ones(ucell_1d_m.shape[2])*1.8981
-    #ucell_1d_m[2,0,:] = 1.45
     ucell_1d_m[1,0,:] = np.ones(ucell_1d_m.shape[2])*1.8981
-    #ucell_1d_m[0,0,:] = 1.45
     thickness = [sio2_1,hfo2_1, sio2_2,hfo2_2, height]
 
     #call backend/calculate
@@ -154,31 +126,38 @@ def minimization_function(x):
     print(de_ri[0, fto-1])
     return -de_ri[0, fto-1]
 
+def optimization_parameter_function(x): #optimize optimization parameter(LIDT/EFI) for max energy reaching target
+    duty_cycle, height, hfo2_1, sio2_1, hfo2_2, sio2_2 = x
+    layers = [hfo2_1, sio2_1, hfo2_2, sio2_2]
+    opt_param, _, _, _, _ = calculation_function(duty_cycle, height, layers)
+    return opt_param    
+
 def main():
     duty_cycle = .30  #float(input("Duty cycle (%): ")) / 100
     height = 100 #float(input("Height (nm): "))
-
     #optimize for grating duty cycle and height
     calculation_function(duty_cycle, height)
     x0 = [duty_cycle, height, 100, 100, 100, 100]
     bounds = [(0.05,0.95),(100,2000),(10,200),(100,200),(10,200),(300,500)]
     result1 = differential_evolution(minimization_function,bounds=bounds, popsize=60, workers=-1,
-    maxiter=1000, polish = True,updating="deferred") #maxiter=maximum iterations
+    maxiter=1000, polish = True,updating="deferred") #optimize diffraciton efficiency
     print(rlist[9], result1)
-    duty_cycle = result1.x[0]
-    height = result1.x[1]
-    layers = list(result1.x[2:])
-    print("Final optimized coating")
-    print("Duty cycle =", duty_cycle)
-    print("Height =", height) #grating height
+    print(rlist[10], result2)
+    print(result2)
+    duty_cycle = result2.x[0]
+    height = result2.x[1]
+    layers = list(result2.x[2:])
+    result2 = differential_evolution(optimization_parameter_function,bounds=bounds,popsize=60,workers=-1,
+    maxiter=1000,polish=True, updating="deferred") #optimize optimization parameter
+    print(rlist[10], result2)
+    print(rlist[11], duty_cycle)
+    print(rlist[12], height) #grating height
     #height of layers
-    print("HfO2 Layer 1 =", layers[0])
-    print("SiO2 Layer 1 =", layers[1])
-    print("HfO2 Layer 2 =", layers[2])
-    print("SiO2 Layer 2 =", layers[3])
+    print(rlist[13], layers[0])
+    print(rlist[14], layers[1])
+    print(rlist[15], layers[2])
+    print(rlist[16], layers[3])
     calculation_function(duty_cycle, height, layers)
-
 
 if __name__ == "__main__":
     main()
-
