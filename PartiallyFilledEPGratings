@@ -23,6 +23,10 @@ pol = 0
 fto = 12
 type_complex = np.complex128
 UCELL_RES = 1000  
+TITLE_FONT_SIZE = 20
+LABEL_FONT_SIZE = 20
+TICK_FONT_SIZE = 15
+ANNOTATION_FONT_SIZE = 14
 
 # Increase EFI_WEIGHT to prioritize EFI mitigation (in the silica pillars), decrease to prioritize order -1 efficiency more.
 EFI_WEIGHT = 0.08
@@ -107,33 +111,35 @@ def calculation_function(duty_cycle_siO2, duty_cycle_al2O3, height_siO2, al2O3_f
     print("Optimization parameter:", np.max(optimization_param))
     print("Location of max (z, x):", np.unravel_index(np.argmax(optimization_param), optimization_param.shape))
 
+    
     #display EFI/n maps
     from matplotlib.patches import Rectangle
-    fig, axes = plt.subplots(1, 3, figsize=(21, 4))
+    fig, axes = plt.subplots(1, 2, figsize=(21, 4))
     ax = axes[0]
-    im1 = axes[0].imshow(val, cmap='jet', aspect='auto')
-    rect_si = Rectangle((0, 0), cutoff_siO2, val.shape[0], edgecolor='blue', facecolor='none', linewidth=2)
-    rect_al = Rectangle((cutoff_siO2, 0), cutoff_al2O3 - cutoff_siO2, val.shape[0], edgecolor='cyan', facecolor='none', linewidth=2)
-    ax.add_patch(rect_si)
-    ax.add_patch(rect_al)
+    im1 = axes[0].imshow(val, cmap='jet', aspect='auto', origin='lower')
+    rect_siO2 = Rectangle((0, 0), cutoff_siO2, val.shape[0], edgecolor='blue', facecolor='none', linewidth=2)
+    rect_al2O3 = Rectangle((cutoff_siO2, 0), cutoff_al2O3 - cutoff_siO2, val.shape[0], edgecolor='cyan', facecolor='none', linewidth=2)
+    ax.add_patch(rect_siO2)
+    ax.add_patch(rect_al2O3)
     ax.set_xlabel("X-Axis")
     ax.set_ylabel("Z-Axis")
     ax.set_title("1D E-field Y")
     plt.colorbar(im1, ax=axes[0])
     ax = axes[1]
-    im2 = ax.imshow(n_map, cmap='gray', aspect='auto')
-    rect_si2 = Rectangle((0, 0), cutoff_siO2, res_z, edgecolor='blue', facecolor='none', linewidth=2)
-    rect_al2 = Rectangle((cutoff_siO2, 0), cutoff_al2O3 - cutoff_siO2, res_z, edgecolor='cyan', facecolor='none', linewidth=2)
-    ax.add_patch(rect_si2)
-    ax.add_patch(rect_al2)
+    im2 = ax.imshow(n_map, cmap='gray', aspect='auto',origin='lower')
+    rect_siO2 = Rectangle((0, 0), cutoff_siO2, res_z, edgecolor='blue', facecolor='none', linewidth=2)
+    rect_al2O3 = Rectangle((cutoff_siO2, 0), cutoff_al2O3 - cutoff_siO2, res_z, edgecolor='cyan', facecolor='none', linewidth=2)
+    ax.add_patch(rect_siO2)
+    ax.add_patch(rect_al2O3)
     ax.set_xlabel("X-Axis")
     ax.set_ylabel("Z-Axis")
     ax.set_title("Refractive Index Map (n)")
     plt.colorbar(im2, ax=ax)
-    ax = axes[2]
+    ax = axes[1]
+    plt.tight_layout()
+    plt.show()
     return de_ri, de_ti, SilicaMaxEFI, AluminaAirMaxEFI, TrenchMaxEFI
-
-
+   
 def minimization_function(x, EFI_WEIGHT):
     duty_cycle_siO2, duty_cycle_al2O3, height_siO2, al2O3_frac = x
     if duty_cycle_siO2 + duty_cycle_al2O3 > 1.0:
@@ -164,7 +170,7 @@ def main():
     calculation_function(duty_cycle_siO2, duty_cycle_al2O3, height_siO2, al2O3_frac)
     x0 = [duty_cycle_siO2, duty_cycle_al2O3, height_siO2, al2O3_frac]
     #bounds: (silica duty cycle, alumina/air duty cycle, silica pillar height, alumina fill fraction)
-    bounds = [(0.05, 0.9), (0.05, 0.9), (100, 1000), (0.05, 0.95)]
+    bounds = [(0.1, 0.9), (0.05, 0.9), (100, 1000), (0.05, 0.95)]
     result1 = differential_evolution(minimization_function, bounds=bounds, args=(EFI_WEIGHT,),popsize=60, workers=-1, maxiter=1000, polish=True, updating="deferred")
     print(result1)
     duty_cycle_siO2 = result1.x[0]
