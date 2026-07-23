@@ -1,0 +1,202 @@
+#IMPORTS
+import numpy as np
+import meent
+import matplotlib.pyplot as plt
+import scipy
+from scipy.optimize import minimize
+from contextlib import contextmanager
+from scipy.optimize import differential_evolution
+
+#USING INCORRECT REFRACTIVE INDICIES INTENTIONALLY (switching pillar/fill)
+n_al2O3_1 = 1.45 #ACTUALLY SILICA
+n_sio2 = 1.587
+
+
+
+#SET PARAMETERS
+n_top = 1.0 #air
+n_bot = 1000 #perfect reflector
+#n_al2O3_1 = 1.587 #alumina at 1 OMEGA
+#n_al2O3_3 = 1.644 #alumina at 3 OMEGA
+#n_sio2 = 1.45 #silica
+theta = 61 * np.pi / 180
+field_res_x = 100
+field_res_z = 100
+period = [574.7]
+wavelength = 1053
+pol = 0
+fto = 12
+type_complex = np.complex128
+UCELL_RES = 1000  
+TITLE_FONT_SIZE = 20
+LABEL_FONT_SIZE = 20
+TICK_FONT_SIZE = 15
+ANNOTATION_FONT_SIZE = 14
+
+# Increase to prioritize EFI mitigation (in silica), decrease to prioritize DE
+EFI_WEIGHT = 0.03
+
+def build_ucell(duty_cycle_siO2, height_siO2, al2O3_frac, x_res=UCELL_RES):
+    al2o3_height = al2O3_frac * height_siO2
+    cutoff_siO2 = int(round(x_res * duty_cycle_siO2))
+    cutoff_siO2 = np.clip(cutoff_siO2, 1, x_res - 1)
+    ucell_1d_m = np.ones((2, 1, x_res)) * n_top
+    ucell_1d_m[:, 0, :cutoff_siO2] = n_sio2
+    ucell_1d_m[1, 0, cutoff_siO2:] = n_al2O3_1
+    #ucell_1d_m[1, 0, :cutoff_siO2] = n_sio2
+    thickness = [height_siO2 - al2o3_height, al2o3_height]
+    index_map = np.ones([field_res_z*len(thickness),field_res_x])
+    index_map[:, :int(round(field_res_x*duty_cycle_siO2))] = n_sio2
+    index_map[field_res_z:, int(round(field_res_x*duty_cycle_siO2)):] = n_al2O3_1
+    return ucell_1d_m, thickness, cutoff_siO2,index_map
+
+def calculation_function(duty_cycle_siO2, height_siO2, al2O3_frac): 
+    ucell_1d_m, thickness, cutoff_siO2, index_map = build_ucell(duty_cycle_siO2,height_siO2,al2O3_frac)
+    mee = meent.call_mee(backend=0, n_top=n_top, n_bot=n_bot, theta=theta, fto=fto, pol=pol, wavelength=wavelength, period=period, ucell=ucell_1d_m, thickness=thickness, type_complex=type_complex)
+    result1, field_cell = mee.conv_solve_field(res_z=field_res_z, res_y=1, res_x=field_res_x)
+    res = result1.res
+    de_ri = res.de_ri_s
+    de_ti = res.de_ti_s
+    print(field_cell.shape)
+    val = np.abs(field_cell[:, 0, :, 0])**2
+    print(val.shape)
+
+    #two lateral regions
+    res_z, res_x = val.shape
+    cutoff_siO2 = int(round(res_x * duty_cycle_siO2))
+    silica_region = val[:, :cutoff_siO2]
+    alumina_region = val[int(round(res_z/2)):, cutoff_siO2:]
+    SilicaMaxEFI = np.max(silica_region) if silica_region.size else 0.0
+    AluminaMaxEFI = np.max(alumina_region) if alumina_region.size else 0.0
+    silicaDamageFactor = SilicaMaxEFI*n_sio2**3
+    aluminaDamageFactor = SilicaMaxEFI*n_al2O3_1**3
+    print("total DE of reflection", de_ri.sum())
+    print("total DE of transmission", de_ti.sum())
+    print("Order 0 DE", de_ri[0, fto])
+    print("Order -1 DE", de_ri[0, fto-1])
+    print("Order 1 DE", de_ri[0, fto+1])
+    print("absorption", (1-de_ti.sum())-de_ri.sum())
+    print("EFI Max", np.max(val))
+    '''
+    print("Max silica pillar EFI", SilicaMaxEFI)
+    print("Max alumina pillar EFI", AluminaMaxEFI)
+    print("Silica pillar height (max height)", height_siO2)
+    print("Alumina fill height", al2O3_frac * height_siO2)
+    '''
+    print("Max alumina pillar EFI", SilicaMaxEFI)
+    print("Max silica pillar EFI", AluminaMaxEFI)
+    print("Alumina pillar height (max height)", height_siO2)
+    print("Silica fill height", al2O3_frac * height_siO2)
+
+    '''#refractive index map
+    total_t = sum(thickness)
+    #z_pixels = [max(1, round(res_z * t / total_t)) for t in thickness]
+    #z_pixels[0] += res_z - sum(z_pixels)
+    def row_for_layer(is_bottom):
+        row = np.full(res_x, n_top)
+        row[:cutoff_siO2] = n_sio2
+        if is_bottom:
+            row[cutoff_siO2:] = n_al2O3_1
+        return row
+    layer_n = [row_for_layer(is_bottom=True), row_for_layer(is_bottom=False)]
+    n_map = np.zeros((res_z, res_x))
+    z = 0
+    for nz, n_row in zip(z_pixels, layer_n):
+        n_map[z:z+nz, :] = n_row
+        z += nz
+    de_minus1 = de_ri[0, fto-1]
+    damage_factor = 12/(val*n_map**3)
+    optimization_param = de_minus1/damage_factor'''
+
+    if silicaDamageFactor>aluminaDamageFactor:
+        damage_factor = silicaDamageFactor
+    else:
+        damage_factor = aluminaDamageFactor
+    print("LIDT Metric:", damage_factor)
+    #print("Optimization parameter:", np.max(optimization_param))
+    #print("Location of max (z, x):", np.unravel_index(np.argmax(optimization_param), optimization_param.shape))
+    
+    from matplotlib.patches import Rectangle
+    fig, axes = plt.subplots(1, 2, figsize=(21, 4))
+    ax = axes[0]
+    im1 = ax.imshow(val,cmap="jet",aspect="auto",origin="upper")
+    rect_siO2 = Rectangle((0, 0),cutoff_siO2,val.shape[0],edgecolor="blue",facecolor="none",linewidth=2,)
+    rect_al2O3 = Rectangle((cutoff_siO2, 0),val.shape[1] - cutoff_siO2,val.shape[0],edgecolor="cyan",facecolor="none",linewidth=2,)
+    ax.add_patch(rect_siO2)
+    ax.add_patch(rect_al2O3)
+    ax.set_xlabel("X")
+    ax.set_ylabel("Z")
+    ax.set_title("EFI")
+    plt.colorbar(im1, ax=ax)
+    ax = axes[1]
+    im2 = ax.imshow(index_map,cmap="gray",aspect="auto",origin="upper")
+    print(val.shape)
+    print(index_map.shape)
+    rect_siO2 = Rectangle((0, 0),cutoff_siO2,res_z,edgecolor="blue",facecolor="none",linewidth=2,)
+    rect_al2O3 = Rectangle((cutoff_siO2, 0),res_x - cutoff_siO2,res_z,edgecolor="cyan",facecolor="none",linewidth=2,)
+    ax.add_patch(rect_siO2)
+    ax.add_patch(rect_al2O3)
+    ax.set_xlabel("X")
+    ax.set_ylabel("Z")
+    ax.set_title("Refractive Index Map")
+    plt.colorbar(im2, ax=ax)
+    plt.tight_layout()
+    plt.show()
+    return de_ri, de_ti, SilicaMaxEFI, AluminaMaxEFI
+   
+def minimization_function(x, EFI_WEIGHT):
+    duty_cycle_siO2, height_siO2, al2O3_frac = x
+    ucell_1d_m, thickness, cutoff_siO2,index_map = build_ucell(duty_cycle_siO2,height_siO2,al2O3_frac)
+    mee = meent.call_mee(backend=0, n_top=n_top, n_bot=n_bot, theta=theta, fto=fto, pol=pol, wavelength=wavelength, period=period, ucell=ucell_1d_m, thickness=thickness, type_complex=type_complex)
+    result1, field_cell = mee.conv_solve_field(res_z=field_res_z, res_y=1, res_x=field_res_x)
+    de_ri = result1.res.de_ri_s
+    de_minus1 = de_ri[0, fto-1]
+    val = np.abs(field_cell[:, 0, :, 0])**2
+    res_z, res_x = val.shape
+    cutoff_si_field = int(res_x * duty_cycle_siO2)
+    silica_efi_max = np.max(val[:, :cutoff_si_field])
+    alumina_efi_max = np.max(val[int(round(res_z/2)):, cutoff_si_field:])
+    silicaDamageFactor = silica_efi_max* n_sio2**3
+    aluminaDamageFactor = alumina_efi_max* n_al2O3_1**3
+    if silicaDamageFactor>aluminaDamageFactor:
+        damage_factor = silicaDamageFactor
+    else:
+        damage_factor = aluminaDamageFactor
+    mechanicsFactor = thickness[0]/(duty_cycle_siO2*period[0])
+    objective = -de_minus1 + EFI_WEIGHT * damage_factor
+    #objective = -de_minus1/damage_factor
+    #objective = -de_minus1/damage_factor + EFI_WEIGHT*mechanicsFactor
+
+    print(f"duty_siO2={duty_cycle_siO2:.3f} h_siO2={height_siO2:.1f} "
+          f"al2O3_frac={al2O3_frac:.3f} (h_al2O3={al2O3_frac*height_siO2:.1f})  "
+          f"DE-1={de_minus1:.4f}  SilicaEFI_max={silica_efi_max:.3f}  obj={objective:.4f}")
+
+    return objective
+
+
+def main():
+    duty_cycle_siO2 = 0.30
+    height_siO2 = 300
+    al2O3_frac = 0.5  #alumina fill 50% silica height, air above it
+    calculation_function(duty_cycle_siO2, height_siO2, al2O3_frac) 
+    x0 = [duty_cycle_siO2, height_siO2, al2O3_frac] 
+    bounds = [(0.2, 1.0), (100, 1000), (0.6, 0.95)]
+    result1 = differential_evolution(minimization_function, bounds=bounds, args=(EFI_WEIGHT,),popsize=60, workers=-1, maxiter=1000, polish=True, updating="deferred")
+    print(result1)
+    duty_cycle_siO2 = result1.x[0]
+    height_siO2 = result1.x[1]
+    al2O3_frac = result1.x[2]
+    print("Final optimized coating")
+    '''
+    print("Silica pillar duty cycle =", duty_cycle_siO2)
+    print("Silica pillar height (max height) =", height_siO2)
+    print("Alumina fill fraction =", al2O3_frac, "alumina height =", al2O3_frac * height_siO2)
+    '''
+    print("Alumina pillar duty cycle =", duty_cycle_siO2)
+    print("Alumina pillar height (max height) =", height_siO2)
+    print("Silica fill fraction =", al2O3_frac, "silica height =", al2O3_frac * height_siO2)
+
+    calculation_function(duty_cycle_siO2, height_siO2, al2O3_frac) 
+
+if __name__ == "__main__":
+    main()
