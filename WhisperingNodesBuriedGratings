@@ -7,6 +7,7 @@ from scipy.optimize import minimize
 from contextlib import contextmanager
 from scipy.optimize import differential_evolution
 
+
 #SET PARAMETERS
 n_top = 1.0
 n_bot = 1000
@@ -195,9 +196,10 @@ def minimization_function(x, efi_weight=EFI_WEIGHT):
 
 
 def main():
-    duty_cycle = .30  #float(input("Duty cycle (%): ")) / 100
-    height = 100 #float(input("Height (nm): "))
-    wavelength_sweep(duty_cycle, height, layers=None, wl_start=1028, wl_end=1078, wl_step=1) 
+    duty_cycle =  0.5149353899782568  #float(input("Duty cycle (%): ")) / 100
+    height =  621.124795526877 #float(input("Height (nm): "))
+    layers = [178.25768304348273,188.14275512861732, 138.56690466276137,300.0]
+    wavelength_sweep(duty_cycle, height, layers=layers, wl_start=1028, wl_end=1078, wl_step=1) 
     calculation_function(duty_cycle, height)    #optimize for grating duty cycle and height
    # x0 = [duty_cycle, height, 100, 100, 100, 100]
     bounds = [(0.05,0.95),(100,1000),(10,200),(100,200),(10,200),(300,500)]
